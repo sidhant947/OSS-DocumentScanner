@@ -30,7 +30,7 @@
     "main": "app/bootstrap",
     "description": "NativeScript Application",
     "license": "MIT",
-    "repository": "https://github.com/ossdocumentscanner/OSS-DocumentScanner",
+    "repository": "https://github.com/Akylas/OSS-DocumentScanner",
     "bugs": {
         "url": "https://github.com/ossdocumentscanner/OSS-DocumentScanner/issues"
     },
