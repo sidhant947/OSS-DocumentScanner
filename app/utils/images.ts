@@ -6,7 +6,7 @@ export async function loadImage(imagePath, loadOptions: { width?; height?; resiz
         return new ImageSource(ImageUtils.readImageFromFileSync(imagePath, JSON.stringify(loadOptions)));
     } else {
         const result = new ImageSource(com.akylas.documentscanner.utils.ImageUtil.Companion.readBitmapFromFile(Utils.android.getApplicationContext(), imagePath, JSON.stringify(loadOptions)));
-        DEV_LOG && console.log('loadImage', imagePath, result);
+        // DEV_LOG && console.log('loadImage', imagePath, result);
         return result;
     }
     // const asset = new ImageAsset(imagePath);

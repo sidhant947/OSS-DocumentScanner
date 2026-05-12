@@ -9,7 +9,6 @@ import { PDF_EXT } from '~/utils/constants';
 import { recycleImages } from '~/utils/images';
 import { getPageColorMatrix } from '~/utils/matrix';
 import { pkpassToImage } from '~/utils/pkpass';
-import { requestStoragePermission } from '~/utils/ui';
 import { PDFExportOptions, getPDFDefaultExportOptions } from './PDFCanvas';
 export async function exportPDFAsync({ compress, document, filename, folder, options: baseOptions, pages }: PDFExportOptions): Promise<string> {
     DEV_LOG && console.log('exportPDFAsync', pages.length, folder, filename);
@@ -20,7 +19,6 @@ export async function exportPDFAsync({ compress, document, filename, folder, opt
         folder = knownFolders.temp().path;
     }
     if (__ANDROID__) {
-        await requestStoragePermission();
         // return new Promise((resolve, reject) => {
         // pages.forEach((page) => {
         //     if (page.colorType && !page.colorMatrix) {

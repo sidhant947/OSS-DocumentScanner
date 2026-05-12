@@ -1,16 +1,11 @@
-import { File, Screen, knownFolders, path } from '@nativescript/core';
-import { wrapNativeException } from '@nativescript/core/utils';
-import { generatePDFASync } from 'plugin-nativeprocessor';
+import { File, path } from '@nativescript/core';
 import type { DocFolder, OCRDocument } from '~/models/OCRDocument';
 import { networkService } from '~/services/api';
 import { DocumentEvents } from '~/services/documents';
-import PDFExportCanvas from '~/services/pdf/PDFExportCanvas';
 import { BasePDFSyncService, BasePDFSyncServiceOptions } from '~/services/sync/BasePDFSyncService';
 import { OAuthTokens } from '~/services/sync/OAuthHelper';
 import { type OneDriveSyncOptions, OneDriveSyncService, getItemByPath, getOrCreateFolder, listItems, uploadFile } from '~/services/sync/onedrive/OneDrive';
 import { SERVICES_SYNC_MASK } from '~/services/sync/types';
-import { PDF_EXT } from '~/utils/constants';
-import { getPageColorMatrix } from '~/utils/matrix';
 import type { FileStat } from '~/webdav';
 
 export interface OneDrivePDFSyncServiceOptions extends BasePDFSyncServiceOptions, OneDriveSyncOptions {}
@@ -77,37 +72,8 @@ export class OneDrivePDFSyncService extends BasePDFSyncService implements OneDri
     getItemByPath(path: string) {
         return getItemByPath(this, path, this.remoteFolderId, this.remoteFolder);
     }
-    override async writePDF(document: OCRDocument, fileName: string, docFolder?: DocFolder) {
-        const pages = document.pages;
-        if (!pages || pages.length === 0) {
-            return;
-        }
-        if (!fileName.endsWith(PDF_EXT)) {
-            fileName += PDF_EXT;
-        }
-        const temp = knownFolders.temp().path;
 
-        if (__ANDROID__) {
-            const exportOptions = this.exportOptions;
-            const black_white = exportOptions.color === 'black_white';
-            const options = JSON.stringify({
-                overwrite: true,
-                // page_padding: Utils.layout.toDevicePixels(pdfCanvas.options.page_padding),
-                text_scale: Screen.mainScreen.scale * 1.4,
-                pages: pages.map((p) => ({ ...p, colorMatrix: getPageColorMatrix(p, black_white ? 'grayscale' : undefined) })),
-                ...exportOptions
-            });
-            await generatePDFASync(temp, fileName, options, wrapNativeException);
-        } else {
-            const exporter = new PDFExportCanvas();
-            await exporter.export({ pages: pages.map((page) => ({ page, document })), folder: temp, filename: fileName, compress: true, options: this.exportOptions });
-        }
-        const localFilePath = path.join(temp, fileName);
-        // let destinationPath = this.remoteFolder;
-        // if (docFolder) {
-        //     destinationPath = path.join(destinationPath, docFolder.name);
-        //     await this.ensureRemoteFolder(destinationPath);
-        // }
+    async uploadPDF(document: OCRDocument, localFilePath: string, fileName: string, docFolder?: DocFolder) {
         let targetFolderId = this.remoteFolderId;
         if (docFolder) {
             const folderPath = docFolder.name;

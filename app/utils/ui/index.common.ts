@@ -749,6 +749,9 @@ export async function showPDFPopoverMenu({
                                     const folder = componentInstanceInfo.viewInstance.folder;
                                     showLoading(lc('exporting'));
                                     DEV_LOG && console.log('exportPDF', folder, filename, jpegQuality, !!password);
+                                    if (__ANDROID__) {
+                                        await requestStoragePermission();
+                                    }
                                     const filePath = await exportPDFAsync({
                                         pages,
                                         document,

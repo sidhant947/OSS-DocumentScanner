@@ -31,17 +31,16 @@ export interface PaperlessDocument {
     archived_file_name?: string;
 }
 
-export type PaperlessTaskStatus = 'FAILURE' | 'PENDING' | 'RECEIVED' | 'RETRY' | 'REVOKED' | 'STARTED' | 'SUCCESS';
+export type PaperlessTaskStatus = 'failure' | 'pending' | 'received' | 'retry' | 'revoked' | 'started' | 'success';
 
 export interface PaperlessTask {
     task_id: string;
-    task_file_name?: string;
     date_done?: string;
-    type?: string;
     status: PaperlessTaskStatus;
-    result?: string;
     acknowledged?: boolean;
-    related_document?: number;
+    result_data: {
+        document_id: number;
+    };
 }
 
 export interface PaperlessDocumentListResponse {
@@ -159,13 +158,13 @@ export async function listDocuments(service: PaperlessServiceContext): Promise<P
  */
 export async function fetchTasks(service: PaperlessServiceContext): Promise<PaperlessTask[]> {
     await ensureToken(service);
-    const response = await makeRequest<PaperlessTask[]>(service, '/api/tasks/', {
+    const response = await makeRequest<{ results: PaperlessTask[] }>(service, '/api/tasks/', {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json'
         }
     });
-    return response.json();
+    return (await response.json()).results;
 }
 
 /**

@@ -243,7 +243,7 @@ export class SyncService extends BaseWorkerHandler<SyncWorker> {
             documentsService.on(EVENT_DOCUMENT_ADDED, this.onDocumentAdded, this);
             documentsService.on(EVENT_DOCUMENT_UPDATED, this.onDocumentUpdated, this);
             documentsService.on(EVENT_DOCUMENT_DELETED, this.onDocumentDeleted, this);
-            documentsService.on(EVENT_DOCUMENT_PAGE_UPDATED, this.sendImageEvent, this);
+            documentsService.on(EVENT_DOCUMENT_PAGE_UPDATED, this.sendImagesEvent, this);
             documentsService.on(EVENT_DOCUMENT_PAGES_ADDED, this.sendImageEvent, this);
             documentsService.on(EVENT_DOCUMENT_PAGE_DELETED, this.sendPDFEvent, this);
             documentsService.on(EVENT_DOCUMENT_MOVED_FOLDER, this.sendDataEvent, this);

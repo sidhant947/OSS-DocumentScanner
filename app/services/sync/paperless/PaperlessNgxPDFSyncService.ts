@@ -1,15 +1,12 @@
-import { File, Screen, knownFolders, path } from '@nativescript/core';
-import { wrapNativeException } from '@nativescript/core/utils';
-import { generatePDFASync } from 'plugin-nativeprocessor';
+import { TimeoutError } from '@akylas/nativescript-app-utils/error';
+import { File } from '@nativescript/core';
 import type { DocFolder, OCRDocument } from '~/models/OCRDocument';
 import { networkService } from '~/services/api';
 import { DocumentEvents } from '~/services/documents';
-import PDFExportCanvas from '~/services/pdf/PDFExportCanvas';
 import { BasePDFSyncService, BasePDFSyncServiceOptions } from '~/services/sync/BasePDFSyncService';
 import { PaperlessNgxSyncOptions, PaperlessTask, ensureToken, fetchTasks, listDocuments, updateDocumentVersion, uploadDocument } from '~/services/sync/paperless/PaperlessNgx';
 import { SERVICES_SYNC_MASK } from '~/services/sync/types';
 import { PDF_EXT } from '~/utils/constants';
-import { getPageColorMatrix } from '~/utils/matrix';
 import type { FileStat } from '~/webdav';
 
 export interface PaperlessNgxPDFSyncServiceOptions extends BasePDFSyncServiceOptions, PaperlessNgxSyncOptions {}
@@ -19,7 +16,7 @@ const EXTRA_PAPERLESS_ID_KEY = 'paperless_pdf_id';
 
 /** Polling interval in milliseconds. */
 const POLL_INTERVAL_MS = 2000;
-const MAX_POLL_TIME_MS = 20000;
+const MAX_POLL_TIME_MS = 200000;
 
 export class PaperlessNgxPDFSyncService extends BasePDFSyncService {
     shouldSync(force?: boolean, event?: DocumentEvents) {
@@ -34,7 +31,7 @@ export class PaperlessNgxPDFSyncService extends BasePDFSyncService {
     password?: string;
 
     /** Map from task UUID to its promise resolvers, used for polling. */
-    private pendingTasks = new Map<string, { resolve: (id: number) => void; reject: (err: Error) => void }>();
+    private pendingTasks = new Map<string, { promise: Promise<number>; resolve: (id: number) => void; reject: (err: Error) => void }>();
     /** Single shared polling loop promise, null when not running. */
     private pollingPromise: Promise<void> | null = null;
 
@@ -77,10 +74,30 @@ export class PaperlessNgxPDFSyncService extends BasePDFSyncService {
      * Starts the polling loop if not already running.
      */
     private waitForTask(taskUuid: string): Promise<number> {
-        return new Promise<number>((resolve, reject) => {
-            this.pendingTasks.set(taskUuid, { resolve, reject });
-            this.startPolling();
+        const existing = this.pendingTasks.get(taskUuid);
+
+        if (existing) {
+            // Reuse the in-flight promise
+            return existing.promise;
+        }
+
+        let resolve!: (value: number) => void;
+        let reject!: (reason?: any) => void;
+
+        const promise = new Promise<number>((res, rej) => {
+            resolve = res;
+            reject = rej;
         });
+
+        this.pendingTasks.set(taskUuid, {
+            promise,
+            resolve,
+            reject
+        });
+
+        this.startPolling();
+
+        return promise;
     }
     startPollingStartTime;
     private startPolling() {
@@ -91,7 +108,13 @@ export class PaperlessNgxPDFSyncService extends BasePDFSyncService {
     }
 
     private async pollLoop() {
-        while (this.pendingTasks.size > 0 && Date.now() - this.startPollingStartTime < MAX_POLL_TIME_MS) {
+        while (this.pendingTasks.size > 0) {
+            if (Date.now() - this.startPollingStartTime > MAX_POLL_TIME_MS) {
+                this.pendingTasks.forEach((task, task_id) => {
+                    task.reject(new TimeoutError());
+                });
+                this.pendingTasks.clear();
+            }
             await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
             try {
                 const tasks: PaperlessTask[] = await fetchTasks(this);
@@ -100,57 +123,43 @@ export class PaperlessNgxPDFSyncService extends BasePDFSyncService {
                     if (!pending) {
                         continue;
                     }
-                    if (task.status === 'SUCCESS') {
+                    if (task.status === 'success') {
                         this.pendingTasks.delete(task.task_id);
-                        pending.resolve(task.related_document);
-                    } else if (task.status === 'FAILURE' || task.status === 'REVOKED') {
+                        pending.resolve(task.result_data.document_id);
+                    } else if (task.status === 'failure' || task.status === 'revoked') {
                         this.pendingTasks.delete(task.task_id);
-                        pending.reject(new Error(`Paperless task ${task.task_id} failed with status ${task.status}: ${task.result ?? ''}`));
+                        pending.reject(new Error(`Paperless task ${task.task_id} failed with status ${task.status}: ${task.result_data ?? ''}`));
                     }
                 }
             } catch (err) {
-                DEV_LOG && console.error('PaperlessNgxPDFSyncService', 'pollLoop error', err);
+                DEV_LOG && console.error('PaperlessNgxPDFSyncService', 'pollLoop error', err, err.task);
             }
         }
         this.pollingPromise = null;
     }
 
-    override async writePDF(document: OCRDocument, fileName: string, _docFolder?: DocFolder) {
-        const pages = document.pages;
-        if (!pages || pages.length === 0) {
-            return;
-        }
-        if (!fileName.endsWith(PDF_EXT)) {
-            fileName += PDF_EXT;
-        }
-        const temp = knownFolders.temp().path;
-
-        if (__ANDROID__) {
-            const exportOptions = this.exportOptions;
-            const black_white = exportOptions.color === 'black_white';
-            const options = JSON.stringify({
-                overwrite: true,
-                text_scale: Screen.mainScreen.scale * 1.4,
-                pages: pages.map((p) => ({ ...p, colorMatrix: getPageColorMatrix(p, black_white ? 'grayscale' : undefined) })),
-                ...exportOptions
-            });
-            await generatePDFASync(temp, fileName, options, wrapNativeException);
-        } else {
-            const exporter = new PDFExportCanvas();
-            await exporter.export({ pages: pages.map((page) => ({ page, document })), folder: temp, filename: fileName, compress: true, options: this.exportOptions });
-        }
-        const localFilePath = path.join(temp, fileName);
+    async uploadDocument(document: OCRDocument, localFilePath: string, fileName: string, docFolder?: DocFolder) {
+        const taskUuid = await uploadDocument(this, fileName, File.fromPath(localFilePath));
+        const paperlessDocId = await this.waitForTask(taskUuid);
+        return document.save({ extra: { [EXTRA_PAPERLESS_ID_KEY]: paperlessDocId } }, false, false);
+    }
+    async uploadPDF(document: OCRDocument, localFilePath: string, fileName: string, docFolder?: DocFolder) {
         try {
             const existingPaperlessId = document.extra?.[EXTRA_PAPERLESS_ID_KEY] as number;
-
             if (existingPaperlessId) {
                 // Document already exists on Paperless — upload a new version
-                await updateDocumentVersion(this, existingPaperlessId, fileName, File.fromPath(localFilePath));
+                try {
+                    await updateDocumentVersion(this, existingPaperlessId, fileName, File.fromPath(localFilePath));
+                } catch (error) {
+                    if (/not found/i.test(error.message)) {
+                        await this.uploadDocument(document, localFilePath, fileName, docFolder);
+                    } else {
+                        throw error;
+                    }
+                }
             } else {
                 // New document — upload and wait for the task to resolve with the Paperless doc ID
-                const taskUuid = await uploadDocument(this, fileName, File.fromPath(localFilePath));
-                const paperlessDocId = await this.waitForTask(taskUuid);
-                await document.save({ extra: { [EXTRA_PAPERLESS_ID_KEY]: paperlessDocId } }, false, false);
+                await this.uploadDocument(document, localFilePath, fileName, docFolder);
             }
         } finally {
             try {

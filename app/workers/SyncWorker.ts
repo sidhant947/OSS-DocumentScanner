@@ -42,6 +42,7 @@ import {
 import { recycleImages } from '~/utils/images';
 import { basename } from '~/utils/path';
 import { SyncNotificationManager } from '~/workers/SyncNotificationManager';
+import { doInBatch } from '@shared/utils/batch';
 
 const context: Worker = self as any;
 
@@ -894,33 +895,40 @@ export default class SyncWorker extends BaseWorker {
                         const totalDocuments = documentsToSync.length;
                         let currentDocIndex = 0;
 
-                        for (let index = 0; index < documentsToSync.length; index++) {
-                            const doc = documentsToSync[index];
-                            const pages = doc.pages.filter((p) => !!p);
-                            const document = doc.document;
-                            //see if we need to OCR
-                            if (service.OCREnabled && service.OCRLanguages.length && event?.eventName !== EVENT_DOCUMENT_PAGE_DELETED) {
-                                const OCRDataPath = path.join(baseOCRDataPath, service.OCRDataType);
-                                // we need to make sure the OCR update wont trigger another sync or we will end up in an endless loop
-                                await Promise.all(
-                                    pages.map(async (p, index) => document.ocrPage({ pageIndex: index, language: service.OCRLanguages.join('+'), dataPath: OCRDataPath, notify: false }))
-                                );
-                            }
+                        await doInBatch(
+                            documentsToSync,
+                            async (doc: { document: OCRDocument; pages: OCRPage[] }) => {
+                                const pages = doc.pages.filter((p) => !!p);
+                                const document = doc.document;
+                                //see if we need to OCR
+                                if (service.OCREnabled && service.OCRLanguages.length && event?.eventName !== EVENT_DOCUMENT_PAGE_DELETED) {
+                                    const OCRDataPath = path.join(baseOCRDataPath, service.OCRDataType);
+                                    // we need to make sure the OCR update wont trigger another sync or we will end up in an endless loop
+                                    await Promise.all(
+                                        pages.map(async (p, index) => document.ocrPage({ pageIndex: index, language: service.OCRLanguages.join('+'), dataPath: OCRDataPath, notify: false }))
+                                    );
+                                }
 
-                            const name = service.getPDFName(document);
-                            const existing = remoteFiles.find((r) => r.basename === name);
-                            DEV_LOG && console.info('syncPDFDocuments', 'test', document.id, existing?.lastmod, document.modifiedDate);
-                            if (!existing || new Date(existing.lastmod).valueOf() < document.modifiedDate) {
-                                await service.writePDF(
-                                    document,
-                                    name,
-                                    service.useFoldersStructure && document.folders?.length ? await documentsService.folderRepository.findFolderById(document.folders[0]) : null
-                                );
-                            }
-                            await document.save({ _synced: document._synced | service.syncMask });
-                            currentDocIndex++;
-                            this.updateSyncProgress('pdf', currentDocIndex, totalDocuments, document.id, document.name);
-                        }
+                                const name = service.getPDFName(document);
+                                const existing = remoteFiles.find((r) => r.basename === name);
+                                DEV_LOG && console.info('syncPDFDocuments', 'test', document.id, existing?.lastmod, document.modifiedDate);
+                                if (!existing || new Date(existing.lastmod).valueOf() < document.modifiedDate) {
+                                    await service.writePDF(
+                                        document,
+                                        name,
+                                        service.useFoldersStructure && document.folders?.length ? await documentsService.folderRepository.findFolderById(document.folders[0]) : null
+                                    );
+                                }
+                                await document.save({ _synced: document._synced | service.syncMask });
+                                currentDocIndex++;
+                                this.updateSyncProgress('pdf', currentDocIndex, totalDocuments, document.id, document.name);
+                            },
+                            10
+                        );
+
+                        // for (let index = 0; index < documentsToSync.length; index++) {
+                        //     const doc = documentsToSync[index];
+                        // }
                     }
                     DEV_LOG && console.log('syncPDFDocuments', 'handling service done', service.type, service.id, service.autoSync, force);
                     ApplicationSettings.remove(deleteKey);
