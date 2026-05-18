@@ -105,6 +105,22 @@
             showError(error);
         }
     }
+
+    function getKeyboardType(type: ExtraFieldType) {
+        switch (type) {
+            case ExtraFieldType.Number:
+                return 'number';
+
+            case ExtraFieldType.Date:
+                return 'datetime';
+
+            case ExtraFieldType.String:
+                return 'url';
+
+            default:
+                break;
+        }
+    }
 </script>
 
 <gesturerootview bind:this={rootView} padding={16} rows="auto,auto,auto,auto,auto">
@@ -118,6 +134,7 @@
     <textview
         editable={currentType !== ExtraFieldType.Date}
         hint={lc('value')}
+        keyboardType={getKeyboardType(currentType)}
         margin={tMargin}
         row={3}
         text={currentType === ExtraFieldType.Date ? formatDate(currentTime, 'LL') : currentValue}
