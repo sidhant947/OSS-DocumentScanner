@@ -299,7 +299,11 @@
                     }
                 } else {
                     const firstDocIndex = documents.findIndex((d) => !!d.doc);
-                    documents.splice(0, firstDocIndex, ...folderItems);
+                    if (firstDocIndex !== -1) {
+                        documents.splice(0, firstDocIndex, ...folderItems);
+                    } else {
+                        documents.splice(0, documents.length, ...folderItems);
+                    }
                 }
             }
         } catch (error) {
