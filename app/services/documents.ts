@@ -890,7 +890,7 @@ export class DocumentsService extends Observable {
                 // threading: true,
                 transformBlobs: false,
                 //TODO: it seems ocrData can be sometimes too big. Maybe the best would be not to store it in db
-                cursorWindowSize: 4 * 1024 * 1024
+                cursorWindowSize: 10 * 1024 * 1024
             } as any);
         }
 
