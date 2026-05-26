@@ -270,5 +270,15 @@
     "most_used": "Plej uzataj",
     "move": "Movi",
     "move_data": "Ĉu movi datumojn?",
+    "move_data_desc": "Ĉiuj viaj apo-datumoj moviĝos kaj poste la apo devos restarti",
+    "move_folder": "Movi en dosierujon",
+    "move_folder_desc": "Movu la elektitan dokumenton en dosierujon. Lasu la kampon malplena por forigi el dosierujo",
+    "moving_files": "Movado de dosieroj",
+    "name": "Nomo",
+    "nb_columns": "Vertikaloj",
+    "nb_columns_desc": "Nombro de vertikaloj en listoj de dokumentoj (faris por platkomputiloj, eble aspektas malĝuste en poŝtelefonoj)",
+    "nb_columns_landscape": "Vertikaloj en horizontala reĝimo",
+    "nb_columns_landscape_desc": "Nombro de vertikaloj por uzi en horizontala reĝimo",
+    "nb_columns_view": "Nombro de vertikaloj en dokumento-vido",
     "toggle_favorite": "Baskuli ĉu favorata"
 }
