@@ -7,7 +7,7 @@ import { DocFolder, OCRDocument, OCRPage, getDocumentsService, setDocumentsServi
 import { DocumentEvents, DocumentsService } from '~/services/documents';
 import { getTransformedImage } from '~/services/pdf/PDFExportCanvas.common';
 import type { SyncStateEventData } from '~/services/sync';
-import { BaseDataSyncService } from '~/services/sync/BaseDataSyncService';
+import { BaseDataSyncService, DeletedDocumentEntry } from '~/services/sync/BaseDataSyncService';
 import { BaseImageSyncService } from '~/services/sync/BaseImageSyncService';
 import { BasePDFSyncService } from '~/services/sync/BasePDFSyncService';
 import { BaseSyncService, getStoredSyncServices } from '~/services/sync/BaseSyncService';
@@ -43,6 +43,8 @@ import { recycleImages } from '~/utils/images';
 import { basename } from '~/utils/path';
 import { SyncNotificationManager } from '~/workers/SyncNotificationManager';
 import { doInBatch } from '@shared/utils/batch';
+import { mergeDeletedDocumentTombstones } from '~/services/sync/deletedDocuments';
+import { networkService } from '~/services/api';
 
 const context: Worker = self as any;
 
@@ -171,6 +173,43 @@ export default class SyncWorker extends BaseWorker {
         } as SyncStateEventData);
     }
 
+    uniqueDocumentIds(ids: string[] = []) {
+        return Array.from(new Set(ids.filter(Boolean)));
+    }
+
+    async syncPendingDeletedDocuments(service: BaseDataSyncService, documentIds: string[], tombstoneDocuments: DeletedDocumentEntry[]) {
+        const ids = this.uniqueDocumentIds(documentIds);
+        const [deletedDocuments, hasChanged] = mergeDeletedDocumentTombstones(tombstoneDocuments, ids);
+        for (let index = 0; index < ids.length; index++) {
+            try {
+                await service.removeDocumentFromRemote(ids[index]);
+            } catch (error) {
+                if (error?.statusCode !== 404) {
+                    throw error;
+                }
+            }
+        }
+        return [deletedDocuments, hasChanged] as [DeletedDocumentEntry[], boolean];
+    }
+
+    async removeTombstonedLocalDocuments(localDocuments: OCRDocument[], deletedDocuments: { id: string }[]) {
+        if (!deletedDocuments.length || !localDocuments.length) {
+            return localDocuments;
+        }
+        const deletedIds = new Set(deletedDocuments.map((entry) => entry.id));
+        DEV_LOG &&
+            console.log(
+                'removeTombstonedLocalDocuments',
+                localDocuments.map((d) => d.id),
+                deletedIds
+            );
+        const documentsToDelete = localDocuments.filter((document) => deletedIds.has(document.id));
+        if (documentsToDelete.length) {
+            await documentsService.deleteDocuments(documentsToDelete);
+        }
+        return localDocuments.filter((document) => !deletedIds.has(document.id));
+    }
+
     async syncDocumentsQueue(
         data: {
             withFolders?;
@@ -265,17 +304,25 @@ export default class SyncWorker extends BaseWorker {
             this.services
                 .filter((s) => s instanceof BaseDataSyncService)
                 .map(async (service) => {
-                    DEV_LOG && console.log('syncDataDocuments', 'handling service', service.type, service.id, service.autoSync, force);
-                    if (!service.shouldSync(force)) {
+                    if (!service.shouldSync(force, event)) {
+                        DEV_LOG && console.log('syncDataDocuments', 'handling service should not sync', service.autoSync, networkService.connected);
                         return;
                     }
 
                     const deleteKey = getRemoteDeleteDocumentSettingsKey(service);
-                    const documentsToDeleteOnRemote: string[] = JSON.parse(ApplicationSettings.getString(deleteKey, '[]'));
+                    DEV_LOG && console.log('documentsToDeleteOnRemote', deleteKey, ApplicationSettings.getString(deleteKey, '[]'));
+                    const documentsToDeleteOnRemote = this.uniqueDocumentIds(JSON.parse(ApplicationSettings.getString(deleteKey, '[]')));
+                    let serviceLocalDocuments = localDocuments;
+                    DEV_LOG && console.log('syncDataDocuments', 'handling service', service.type, service.id, service.autoSync, force, JSON.stringify(documentsToDeleteOnRemote));
                     if (bothWays) {
+                        await service.ensureRemoteFolder();
+                        let tombstoneDocumentsHasChanged = false;
+                        let tombstoneDocuments = await service.getDeletedDocumentsManifest();
+                        [tombstoneDocuments, tombstoneDocumentsHasChanged] = await this.syncPendingDeletedDocuments(service, documentsToDeleteOnRemote, tombstoneDocuments);
+                        const deletedDocumentIds = new Set(tombstoneDocuments.map((entry) => entry.id));
+                        serviceLocalDocuments = await this.removeTombstonedLocalDocuments(serviceLocalDocuments, tombstoneDocuments);
                         {
                             // first we sync folders
-                            await service.ensureRemoteFolder();
                             DEV_LOG && console.log('syncing folders both ways');
                             const remoteFolders = ((await service.fileExists(FOLDERS_DATA_FILENAME)) ? JSON.parse(await service.getFileFromRemote(FOLDERS_DATA_FILENAME)) : []) as DocFolder[];
                             // we need to send folders not on remote
@@ -314,7 +361,18 @@ export default class SyncWorker extends BaseWorker {
                             toBeAdded: missingLocalDocuments,
                             toBeDeleted: missingRemoteDocuments,
                             union: toBeSyncDocuments
-                        } = findArrayDiffs(localDocuments, remoteDocuments, (a, b) => a.id === b.basename);
+                        } = findArrayDiffs(serviceLocalDocuments, remoteDocuments, (a, b) => a.id === b.basename);
+
+                        for (let index = missingLocalDocuments.length - 1; index >= 0; index--) {
+                            if (deletedDocumentIds.has(missingLocalDocuments[index].basename)) {
+                                missingLocalDocuments.splice(index, 1);
+                            }
+                        }
+                        for (let index = missingRemoteDocuments.length - 1; index >= 0; index--) {
+                            if (deletedDocumentIds.has(missingRemoteDocuments[index].id)) {
+                                missingRemoteDocuments.splice(index, 1);
+                            }
+                        }
 
                         DEV_LOG &&
                             console.log(
@@ -338,15 +396,9 @@ export default class SyncWorker extends BaseWorker {
 
                         for (let index = 0; index < documentsToDeleteOnRemote.length; index++) {
                             const id = documentsToDeleteOnRemote[index];
-                            const missingLocalIndex = missingLocalDocuments.findIndex((d) => d.basename === id);
-                            if (missingLocalIndex !== -1) {
-                                missingLocalDocuments.splice(missingLocalIndex, 1);
-                                await service.removeDocumentFromRemote(id);
-                                currentItemIndex++;
-                                this.updateSyncProgress('data', currentItemIndex, totalItemsToSync, id);
-                            }
+                            currentItemIndex++;
+                            this.updateSyncProgress('data', currentItemIndex, totalItemsToSync, id);
                         }
-                        ApplicationSettings.remove(deleteKey);
 
                         for (let index = 0; index < toBeSyncDocuments.length; index++) {
                             const doc = toBeSyncDocuments[index];
@@ -376,6 +428,9 @@ export default class SyncWorker extends BaseWorker {
                                 currentItemIndex++;
                                 this.updateSyncProgress('data', currentItemIndex, totalItemsToSync, doc.id, doc.name);
                             }
+                        }
+                        if (tombstoneDocumentsHasChanged) {
+                            await service.putDeletedDocumentsManifest(tombstoneDocuments);
                         }
                     } else {
                         if (withFolders || (event && (event.eventName === EVENT_FOLDER_ADDED || event.eventName === EVENT_FOLDER_UPDATED))) {
@@ -408,6 +463,12 @@ export default class SyncWorker extends BaseWorker {
                         const documentsToSyncLength = localDocuments.filter((d) => (d._synced & service.syncMask) === 0).concat(documentsToDeleteOnRemote as any[]).length;
                         if (documentsToSyncLength) {
                             await service.ensureRemoteFolder();
+
+                            let tombstoneDocumentsHasChanged = false;
+                            let tombstoneDocuments = await service.getDeletedDocumentsManifest();
+                            [tombstoneDocuments, tombstoneDocumentsHasChanged] = await this.syncPendingDeletedDocuments(service, documentsToDeleteOnRemote, tombstoneDocuments);
+                            const deletedDocumentIds = new Set(tombstoneDocuments.map((entry) => entry.id));
+                            serviceLocalDocuments = await this.removeTombstonedLocalDocuments(serviceLocalDocuments, tombstoneDocuments);
                             const remoteDocuments = (await service.getRemoteFolderDirectories('')).filter((s) => s.type === 'directory');
                             DEV_LOG && console.log('remoteDocuments', JSON.stringify(remoteDocuments));
                             const {
@@ -415,6 +476,21 @@ export default class SyncWorker extends BaseWorker {
                                 toBeDeleted: missingRemoteDocuments,
                                 union: toBeSyncDocuments
                             } = findArrayDiffs(localDocuments, remoteDocuments, (a, b) => a.id === b.basename);
+                            for (let index = missingLocalDocuments.length - 1; index >= 0; index--) {
+                                if (deletedDocumentIds.has(missingLocalDocuments[index].basename)) {
+                                    missingLocalDocuments.splice(index, 1);
+                                }
+                            }
+                            for (let index = missingRemoteDocuments.length - 1; index >= 0; index--) {
+                                if (deletedDocumentIds.has(missingRemoteDocuments[index].id)) {
+                                    missingRemoteDocuments.splice(index, 1);
+                                }
+                            }
+                            for (let index = toBeSyncDocuments.length - 1; index >= 0; index--) {
+                                if (deletedDocumentIds.has(toBeSyncDocuments[index].id)) {
+                                    toBeSyncDocuments.splice(index, 1);
+                                }
+                            }
                             DEV_LOG &&
                                 console.log(
                                     'missingRemoteDocuments',
@@ -441,10 +517,9 @@ export default class SyncWorker extends BaseWorker {
                                     const missingLocalIndex = missingLocalDocuments.findIndex((d) => d.basename === id);
                                     if (missingLocalIndex !== -1) {
                                         missingLocalDocuments.splice(missingLocalIndex, 1);
-                                        await service.removeDocumentFromRemote(id);
-                                        currentItemIndex++;
-                                        this.updateSyncProgress('data', currentItemIndex, totalItemsToSync, id);
                                     }
+                                    currentItemIndex++;
+                                    this.updateSyncProgress('data', currentItemIndex, totalItemsToSync, id);
                                 }
                             }
                             for (let index = 0; index < missingRemoteDocuments.length; index++) {
@@ -459,6 +534,10 @@ export default class SyncWorker extends BaseWorker {
                                 await this.syncDocumentOnRemote(toBeSyncDocuments[index], service);
                                 currentItemIndex++;
                                 this.updateSyncProgress('data', currentItemIndex, totalItemsToSync, toBeSyncDocuments[index].id, toBeSyncDocuments[index].name);
+                            }
+
+                            if (tombstoneDocumentsHasChanged) {
+                                await service.putDeletedDocumentsManifest(tombstoneDocuments);
                             }
                         }
                     }

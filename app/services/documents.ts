@@ -953,7 +953,7 @@ export class DocumentsService extends Observable {
                 await d.removeFromFolder();
                 await d.removeFromDisk();
                 // we notify on each delete so that UI updates fast
-                documentsService.notify({ eventName: EVENT_DOCUMENT_DELETED, documents: [d], folders: d.folders } as DocumentDeletedEventData);
+                this.notify({ eventName: EVENT_DOCUMENT_DELETED, documents: [d], folders: d.folders } as DocumentDeletedEventData);
             },
             1
         );

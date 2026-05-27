@@ -5,10 +5,12 @@ import { BaseSyncService, BaseSyncServiceOptions } from './BaseSyncService';
 import { SilentError } from '@akylas/nativescript-app-utils/error';
 import { lc } from '@nativescript-community/l';
 import { basename } from '~/utils/path';
-import { DOCUMENT_DATA_FILENAME, VALID_MARKER_FILENAME } from '~/utils/constants';
+import { DELETED_DOCUMENTS_DATA_FILENAME, DOCUMENT_DATA_FILENAME, VALID_MARKER_FILENAME } from '~/utils/constants';
 import { ResponseData, ResponseDataDetailed } from '~/services/sync/interfaces';
+import { type DeletedDocumentEntry, mergeDeletedDocumentTombstones } from '~/services/sync/deletedDocuments';
 
 export type BaseDataSyncServiceOptions = BaseSyncServiceOptions;
+export type { DeletedDocumentEntry };
 
 export abstract class BaseDataSyncService extends BaseSyncService {
     allowToRemoveOnRemote: boolean = true;
@@ -25,6 +27,20 @@ export abstract class BaseDataSyncService extends BaseSyncService {
     abstract deleteFile(relativePath: string): Promise<any>;
 
     abstract getFileContents<V extends 'binary' | 'text' | 'file' = 'binary'>(filePath: string, options?: GetFileContentsOptions & { format?: V }): Promise<ResponseData<V>>;
+
+    async getDeletedDocumentsManifest(): Promise<DeletedDocumentEntry[]> {
+        try {
+            const deletedDocuments = JSON.parse(await this.getFileFromRemote(DELETED_DOCUMENTS_DATA_FILENAME));
+            return Array.isArray(deletedDocuments) ? deletedDocuments.filter((entry) => entry?.id && typeof entry.deletedDate === 'number') : [];
+        } catch (error) {
+            console.warn('invalid deleted documents manifest', error?.message || error);
+            return [];
+        }
+    }
+
+    async putDeletedDocumentsManifest(entries: DeletedDocumentEntry[]): Promise<void> {
+        await this.putFileContentsFromData(DELETED_DOCUMENTS_DATA_FILENAME, JSON.stringify(entries), { overwrite: true });
+    }
 
     async importFolderFromRemote(remoteRelativePath: string, folder: Folder, ignores?: string[]) {
         if (!folder?.path) {

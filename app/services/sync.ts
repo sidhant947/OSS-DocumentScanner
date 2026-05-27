@@ -144,16 +144,21 @@ export class SyncService extends BaseWorkerHandler<SyncWorker> {
         this.syncDocumentsInternal({ event, type, fromEvent: event.eventName });
     }
     onDocumentDeleted(event: DocumentDeletedEventData) {
-        DEV_LOG && console.log('SYNC', 'onDocumentDeleted');
+        if (event.fromWorker === true) {
+            return;
+        }
+        const deletedDocumentIds = event.documents.map((d) => d.id);
+        DEV_LOG && console.log('SYNC', 'onDocumentDeleted', deletedDocumentIds);
 
         this.getStoredSyncServices()
             .filter((s) => s.enabled !== false)
             // .filter((s) => s instanceof BaseDataSyncService)
-            .forEach(async (service) => {
+            .forEach((service) => {
                 const key = getRemoteDeleteDocumentSettingsKey(service as any);
-                const documentsToDeleteOnRemote = JSON.parse(ApplicationSettings.getString(key, '[]'));
-                documentsToDeleteOnRemote.push(...event.documents.map((d) => d.id));
-                ApplicationSettings.setString(key, JSON.stringify(documentsToDeleteOnRemote));
+                const documentsToDeleteOnRemote = JSON.parse(ApplicationSettings.getString(key, '[]')) as string[];
+                documentsToDeleteOnRemote.push(...deletedDocumentIds);
+                DEV_LOG && console.log('updating remote delete document key', JSON.stringify(documentsToDeleteOnRemote));
+                ApplicationSettings.setString(key, JSON.stringify([...new Set(documentsToDeleteOnRemote)]));
             });
         this.sendDataEvent(event);
     }
