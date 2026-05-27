@@ -194,7 +194,7 @@ export class OCRDocument extends Observable implements Document {
         // DEV_LOG && console.log('createDocument pages added');
         // no need to notify on create. Will be done in documentAdded
         await doc.save({}, false, false);
-        documentsService.notify({ eventName: EVENT_DOCUMENT_ADDED, doc, folder } as DocumentAddedEventData);
+        documentsService.notify({ eventName: EVENT_DOCUMENT_ADDED, doc, folder, shouldFocus: true } as DocumentAddedEventData);
         return doc;
     }
 

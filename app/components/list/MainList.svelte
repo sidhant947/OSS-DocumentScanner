@@ -317,22 +317,63 @@
         nbDocuments = documents?.length ?? 0;
         showNoDocument = nbDocuments === 0;
     }
+    async function insertDocumentAtSortedIndex(event: DocumentAddedEventData) {
+        try {
+            if (!documents) {
+                await refresh();
+                return;
+            }
+
+            // Keep same query shape as refresh, but try to request only ids
+            const ordered = await documentsService.documentRepository.findDocuments({
+                filter: lastRefreshFilter,
+                folder,
+                omitThoseWithFolders: true,
+                order: sortOrder,
+                fields: ['id'] // ignored if repository does not support projection
+            } as any);
+
+            const orderedIds = ordered.map((d) => d.id);
+            const sortedDocIndex = orderedIds.indexOf(event.doc.id);
+
+            // Not in current filtered/sorted view => do not insert
+            if (sortedDocIndex === -1) {
+                updateNoDocument();
+                return;
+            }
+
+            // Remove duplicate if already present
+            const existingIndex = documents.findIndex((d) => d.doc?.id === event.doc.id);
+            if (existingIndex !== -1) {
+                documents.splice(existingIndex, 1);
+            }
+
+            // Find where documents start (works for both vertical/horizontal folder styles)
+            const firstDocIndex = documents.findIndex((d) => !!d.doc);
+            const docsStartIndex = firstDocIndex === -1 ? documents.length : firstDocIndex;
+
+            const insertIndex = docsStartIndex + sortedDocIndex;
+            documents.splice(insertIndex, 0, {
+                doc: event.doc,
+                selected: false
+            } as Item);
+
+            if (event.shouldFocus) {
+                collectionView?.nativeElement?.scrollToIndex(insertIndex, false);
+            }
+
+            updateNoDocument();
+        } catch (error) {
+            showError(error);
+            // fallback to full refresh if anything goes wrong
+            refresh();
+        }
+    }
+
     function onDocumentAdded(event: DocumentAddedEventData) {
         // DEV_LOG && console.log('onDocumentAdded', event.doc.id, event.doc.folders, event.folder);
         if ((!event.folder && !folder) || folder?.name === event.folder?.name) {
-            // DEV_LOG && console.log('onDocumentAdded', nbDocuments);
-            // find the first document index to add the new doc just before
-            const index = documents?.findIndex((d) => !!d.doc);
-            if (index !== -1) {
-                documents?.splice(index, 0, {
-                    doc: event.doc,
-                    selected: false
-                } as Item);
-                collectionView?.nativeElement.scrollToIndex(index, false);
-            } else {
-                refresh();
-            }
-            updateNoDocument();
+            void insertDocumentAtSortedIndex(event);
         } else if (!folder && event.folder) {
             refreshFolders();
         }

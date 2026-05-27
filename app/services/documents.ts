@@ -682,7 +682,13 @@ export class DocumentRepository extends BaseRepository<OCRDocument, Document> {
         });
         return result;
     }
-    async findDocuments({ filter, folder, omitThoseWithFolders = false, order = 'id DESC' }: { filter?: string; folder?: DocFolder; omitThoseWithFolders?: boolean; order?: string } = {}) {
+    async findDocuments({
+        filter,
+        folder,
+        omitThoseWithFolders = false,
+        order = 'id DESC',
+        fields = ['*']
+    }: { filter?: string; folder?: DocFolder; omitThoseWithFolders?: boolean; order?: string; fields?: string[] } = {}) {
         // Build the secondary sort expression. All columns are on the Document alias "d".
         const secondaryOrder = `d.${order}`;
         // Always sort favorites first, then by the user-selected key
@@ -690,7 +696,7 @@ export class DocumentRepository extends BaseRepository<OCRDocument, Document> {
 
         const args = {
             select: new SqlQuery([
-                `d.*,
+                `${fields.map((f) => `d.${f}`).join(',')},
             group_concat(f.id, '${FOLDERS_SEPARATOR}') AS folders`
             ]),
             from: sql`Document d`,
@@ -785,7 +791,9 @@ export interface SingleDocumentEventData extends DocumentEventData {
     doc?: OCRDocument;
     folder?: DocFolder;
 }
-export type DocumentAddedEventData = SingleDocumentEventData;
+export interface DocumentAddedEventData extends SingleDocumentEventData {
+    shouldFocus?: boolean;
+}
 export interface DocumentMovedFolderEventData extends SingleDocumentEventData {
     oldFolderId?: number;
 }
