@@ -7,9 +7,10 @@
     import { ALERT_OPTION_MAX_HEIGHT } from '~/utils/constants';
     import { showAlertOptionSelect } from '~/utils/ui';
     import Chip from '~/components/widgets/Chip.svelte';
+    import type { BaseSyncServiceOptions } from '~/services/sync/BaseSyncService';
     import type { Writable } from 'svelte/store';
 
-    export let store: Writable<any>;
+    export let store: Writable<BaseSyncServiceOptions>;
 
     let allFolders: DocFolder[] = [];
 
