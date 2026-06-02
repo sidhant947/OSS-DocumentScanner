@@ -32,6 +32,7 @@
                 ...imageExportSettings,
                 autoSync: false,
                 useFoldersStructure: false,
+                deleteAfterSync: false,
                 enabled: true,
                 fileNameFormat: ApplicationSettings.getString(SETTINGS_FILE_NAME_FORMAT, FILENAME_DATE_FORMAT),
                 color: SERVICES_SYNC_COLOR[serviceType] as string | Color
@@ -71,6 +72,13 @@
             title: lc('auto_sync'),
             description: lc('local_auto_sync_desc'),
             value: $store.autoSync
+        },
+        {
+            type: 'switch',
+            id: 'deleteAfterSync',
+            title: lc('delete_after_sync'),
+            description: lc('delete_after_sync_desc'),
+            value: $store.deleteAfterSync
         },
         ...(typeof topItems === 'function' ? topItems(store) : topItems),
         {

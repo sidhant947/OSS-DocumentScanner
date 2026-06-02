@@ -33,6 +33,7 @@
                 enabled: true,
                 OCREnabled: false,
                 useFoldersStructure: false,
+                deleteAfterSync: false,
                 OCRDataType: 'best',
                 OCRLanguages: [],
                 fileNameFormat: ApplicationSettings.getString(SETTINGS_FILE_NAME_FORMAT, FILENAME_DATE_FORMAT),
@@ -90,6 +91,13 @@
             title: lc('auto_sync'),
             description: lc('local_auto_sync_desc'),
             value: $store.autoSync
+        },
+        {
+            type: 'switch',
+            id: 'deleteAfterSync',
+            title: lc('delete_after_sync'),
+            description: lc('delete_after_sync_desc'),
+            value: $store.deleteAfterSync
         },
         ...(typeof topItems === 'function' ? topItems(store) : topItems),
         {
