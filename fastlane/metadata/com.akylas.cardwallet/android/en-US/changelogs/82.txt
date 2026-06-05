@@ -1,0 +1,13 @@
+Features:
+- implement trash system with restore support
+- add "delete after sync" option for PDF/image sync services
+- add folder filtering to all sync services
+- add per-sync-service folder filtering
+
+Bug fixes:
+- whitepaper enhancement fix (revert to last version)
+- export filename was removing characters which should not be removed
+- you can now search through settings
+Code refactoring:
+- improve type safety and add filter behavior comment
+- Translations update
